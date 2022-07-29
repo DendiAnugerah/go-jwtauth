@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/DendiAnugerah/go-jwtauth/routes"
+	"github.com/DendiAnugerah/go-jwtauth/routers"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,8 +17,8 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Logger())
 
-	routes.AuthRoutes(router)
-	router.UserRoutes(router)
+	routers.AuthRoutes(router)
+	routers.UserRoutes(router)
 
 	router.GET("/api-1", func(c *gin.Context) {
 		c.JSON(200, gin.H{"success": "Acces granted for api-1"})
