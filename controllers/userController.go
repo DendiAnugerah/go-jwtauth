@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/DendiAnugerah/go-jwtauth/database"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -43,6 +45,7 @@ func VerifyPassword(userPassword string, providedPassword string) (bool, string)
 }
 
 func Signup() gin.HandlerFunc {
+
 	return func(c *gin.Context) {
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 		var user models.User
@@ -51,17 +54,20 @@ func Signup() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+
 		validationErr := validate.Struct(user)
 		if validationErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
 			return
 		}
+
 		count, err := userCollection.CountDocuments(ctx, bson.M{"email": user.Email})
 		defer cancel()
 		if err != nil {
 			log.Panic(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while checking email"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while checking for the email"})
 		}
+
 		password := HashPassword(*user.Password)
 		user.Password = &password
 
@@ -69,10 +75,11 @@ func Signup() gin.HandlerFunc {
 		defer cancel()
 		if err != nil {
 			log.Panic(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while checking phone number"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while checking for the phone number"})
 		}
+
 		if count > 0 {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Email or Phone Number already exist"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "this email or phone number already exists"})
 		}
 
 		user.Created_at, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
@@ -92,6 +99,7 @@ func Signup() gin.HandlerFunc {
 		defer cancel()
 		c.JSON(http.StatusOK, resultInsertionNumber)
 	}
+
 }
 
 func Login() gin.HandlerFunc {
@@ -134,8 +142,48 @@ func Login() gin.HandlerFunc {
 
 }
 
-func GetUsers() {
+func GetUsers() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := helpers.CheckUserType(c, "ADMIN"); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var ctx, cancel = context.WithTimeout(context.Background(), 100)
 
+		recordperPage, err := strconv.Atoi(c.Query("recordPerPage"))
+		if err != nil || recordperPage < 1 {
+			recordperPage = 10
+		}
+		page, err1 := strconv.Atoi(c.Query("page"))
+		if err1 != nil || page < 1 {
+			page = 1
+		}
+
+		startIndex := (page - 1) * recordperPage
+		startIndex, err = strconv.Atoi(c.Query("startIndex"))
+
+		matchStage := bson.D{{"$match", bson.D{{}}}}
+		groupStage := bson.D{{"$group", bson.D{
+			{"_id", bson.D{{"_id", "null"}}},
+			{"total_count", bson.D{{"$sum", 1}}},
+			{"data", bson.D{{"$push", "$$ROOT"}}}}}}
+		projectStage := bson.D{
+			{"$project", bson.D{
+				{"_id", 0},
+				{"total_count", 1},
+				{"user_items", bson.D{{"$slice", []interface{}{"$data", startIndex, recordperPage}}}}}}}
+		result, err := userCollection.Aggregate(ctx, mongo.Pipeline{
+			matchStage, groupStage, projectStage})
+		defer cancel()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while listing user items"})
+		}
+		var allusers []bson.M
+		if err = result.All(ctx, &allusers); err != nil {
+			log.Fatal(err)
+		}
+		c.JSON(http.StatusOK, allusers[0])
+	}
 }
 
 func GetUser() gin.HandlerFunc {
